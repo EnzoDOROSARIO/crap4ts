@@ -116,7 +116,10 @@ fn count_decisions(node: Node<'_>, root: Node<'_>, source: &str) -> usize {
 }
 
 fn is_class(node: Node<'_>) -> bool {
-    matches!(node.kind(), "class_declaration" | "class")
+    matches!(
+        node.kind(),
+        "class_declaration" | "abstract_class_declaration" | "class"
+    )
 }
 
 fn is_decision(node: Node<'_>, source: &str) -> bool {
@@ -294,6 +297,23 @@ function outer() {
         let result = analyze(source, false).unwrap();
         assert_eq!(by_name(&result, "outer").complexity, 2);
         assert_eq!(by_name(&result, "inner").complexity, 3);
+        assert_eq!(by_name(&result, "Local.method").complexity, 2);
+    }
+
+    #[test]
+    fn abstract_classes_isolate_initializers_and_qualify_methods() {
+        let source = r#"
+function outer(a: boolean, b: boolean) {
+  abstract class Local {
+    value = a || b;
+    method() { if (a) return b; return false; }
+    abstract declared(): void;
+  }
+}
+"#;
+        let result = analyze(source, false).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(by_name(&result, "outer").complexity, 1);
         assert_eq!(by_name(&result, "Local.method").complexity, 2);
     }
 

@@ -191,6 +191,22 @@ impl CanonPath {
 }
 
 fn path_prefix(path: &str) -> (String, bool, &str) {
+    if let Some(verbatim) = path.strip_prefix("//?/") {
+        let bytes = verbatim.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'/'
+        {
+            return (verbatim[..2].to_owned(), true, &verbatim[3..]);
+        }
+        if verbatim
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("UNC/"))
+        {
+            return ("//".to_owned(), true, &verbatim[4..]);
+        }
+    }
     let bytes = path.as_bytes();
     if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/' {
         return (path[..2].to_owned(), true, &path[3..]);
@@ -326,6 +342,57 @@ mod tests {
                 2
             ),
             Some(0.5)
+        );
+    }
+
+    #[test]
+    fn verbatim_windows_drive_path_preserves_exact_match_precedence() {
+        let coverage = Coverage::parse(
+            "SF:C:/p/src/a.ts\nDA:1,0\nend_of_record\nSF:D:/build/src/a.ts\nDA:1,1\nend_of_record\n",
+        )
+        .unwrap();
+        assert_eq!(
+            coverage.for_function(
+                Path::new(r"\\?\C:\p\src\a.ts"),
+                Path::new(r"\\?\C:\p"),
+                1,
+                1
+            ),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn relative_and_absolute_windows_records_merge_with_verbatim_query() {
+        let coverage = Coverage::parse(
+            "SF:src/a.ts\nDA:1,0\nend_of_record\nSF:C:/p/src/a.ts\nDA:1,1\nend_of_record\n",
+        )
+        .unwrap();
+        assert_eq!(
+            coverage.for_function(
+                Path::new(r"\\?\C:\p\src\a.ts"),
+                Path::new(r"\\?\C:\p"),
+                1,
+                1
+            ),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn verbatim_and_ordinary_unc_paths_are_equivalent() {
+        let coverage = Coverage::parse(
+            "SF://server/share/p/src/a.ts\nDA:4,1\nend_of_record\nSF://other/share/p/src/a.ts\nDA:4,0\nend_of_record\n",
+        )
+        .unwrap();
+        assert_eq!(
+            coverage.for_function(
+                Path::new(r"\\?\UNC\server\share\p\src\a.ts"),
+                Path::new(r"\\?\UNC\server\share\p"),
+                4,
+                4
+            ),
+            Some(1.0)
         );
     }
 
